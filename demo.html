@@ -9,13 +9,55 @@
 		top: 0;
 		left: 0;
 	}
+
+	#test-date {
+		position: absolute;
+		z-index: 1000;
+		top: 10px;
+		left: 50px;
+		padding: 6px 10px;
+		background: rgba(255, 255, 255, 0.9);
+		border-radius: 4px;
+		font: 14px/1.3 sans-serif;
+	}
 </style>
 <div id="map"></div>
+<div id="test-date"></div>
 
 <script>
 	// var map = L.map('map', { minZoom: 2, maxBounds: [[-85, -350], [85, 350]] }) // to avoid seeing terminator's end
 	var map = L.map('map') // 
 		.addLayer(L.tileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'))
 		.setView([0, 0], 1.5);
-	L.terminator({stroke: true, color: '#ff0000', weight: 2}).addTo(map)
+
+	var testDates = [];
+	var testDays = [1, 15, 21, 31];
+
+	for (var month = 0; month < 12; month++) {
+		for (var i = 0; i < testDays.length; i++) {
+			var date = new Date(Date.UTC(2026, month, testDays[i], 10, 0, 0));
+
+			if (date.getUTCMonth() === month) {
+				testDates.push(date);
+			}
+		}
+	}
+
+	var testDateIndex = 0;
+	var testDateLabel = document.getElementById('test-date');
+	var terminator = L.terminator({
+		stroke: true,
+		color: '#ff0000',
+		weight: 2
+	}).addTo(map);
+
+	function showNextTestDate() {
+		var date = testDates[testDateIndex];
+		terminator.setTime(date);
+		testDateLabel.textContent = date.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+		testDateIndex = (testDateIndex + 1) % testDates.length;
+	}
+
+	showNextTestDate();
+	setInterval(showNextTestDate, 1500);
 </script>

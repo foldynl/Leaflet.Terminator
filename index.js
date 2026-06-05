@@ -6,6 +6,7 @@ var R2D = 180 / Math.PI;
 var D2R = Math.PI / 180;
 var MAX_RESOLUTION = 10;
 var MAX_LONGITUDE_RANGE = 1440;
+var EPSILON = 1e-9;
 
 function julian(date) {
 	/* Calculate the present UTC Julian Date. Function is valid after
@@ -218,6 +219,15 @@ var Terminator = L.LayerGroup.extend({
 			0,
 			90 - this.options.solarDepression
 		) * D2R;
+
+		if (sunPos.delta < -this.options.solarDepression - EPSILON) {
+			return this._computePolarTwilightBoundary(antiSolarPoint, angularDistance, 90);
+		}
+
+		if (sunPos.delta > this.options.solarDepression + EPSILON) {
+			return this._computePolarTwilightBoundary(antiSolarPoint, angularDistance, -90);
+		}
+
 		var sinLat1 = Math.sin(lat1);
 		var cosLat1 = Math.cos(lat1);
 		var sinDistance = Math.sin(angularDistance);
@@ -240,6 +250,49 @@ var Terminator = L.LayerGroup.extend({
 		}
 
 		return points;
+	},
+
+	_computePolarTwilightBoundary: function (antiSolarPoint, angularDistance, poleLat) {
+		var points = [];
+		var steps = Math.ceil(360 * this.options.resolution);
+		var startLng = normalizeLongitude(antiSolarPoint.lng + 180);
+		var lngStep = 360 / steps;
+
+		for (var i = 0; i <= steps; i++) {
+			var lng = startLng - i * lngStep;
+			points.push([
+				this._polarBoundaryLatitude(antiSolarPoint, angularDistance, lng, poleLat),
+				lng
+			]);
+		}
+
+		return points;
+	},
+
+	_polarBoundaryLatitude: function (antiSolarPoint, angularDistance, lng, poleLat) {
+		var antiLat = antiSolarPoint.lat * D2R;
+		var deltaLng = (lng - antiSolarPoint.lng) * D2R;
+		var sinAntiLat = Math.sin(antiLat);
+		var scaledCosLng = Math.cos(antiLat) * Math.cos(deltaLng);
+		var radius = Math.sqrt(
+			sinAntiLat * sinAntiLat +
+			scaledCosLng * scaledCosLng
+		);
+		var ratio = Math.cos(angularDistance) / radius;
+		ratio = Math.max(-1, Math.min(1, ratio));
+
+		var angle = Math.asin(ratio);
+		var phase = Math.atan2(scaledCosLng, sinAntiLat);
+		var lat = poleLat > 0 ? angle - phase : Math.PI - angle - phase;
+
+		while (lat > Math.PI) {
+			lat -= 2 * Math.PI;
+		}
+		while (lat < -Math.PI) {
+			lat += 2 * Math.PI;
+		}
+
+		return Math.max(-90, Math.min(90, lat * R2D));
 	},
 
 	_applyLongitudeRange: function (points) {
@@ -340,40 +393,28 @@ var Terminator = L.LayerGroup.extend({
 	},
 
 	_filledRings: function (ring) {
-		var bounds = this._ringBounds(ring);
-		var filledRings = [
-			this._outerRing(bounds),
-			ring
-		];
+		var northPoleDark = this._isPoleDark(90);
+		var southPoleDark = this._isPoleDark(-90);
 
-		if (!this._isPoleDark(90)) {
-			filledRings.push([
-				[bounds.maxLat, bounds.minLng],
-				[bounds.maxLat, bounds.maxLng],
-				[90, bounds.maxLng],
-				[90, bounds.minLng]
-			]);
+		if (!northPoleDark && !southPoleDark) {
+			return [ring];
 		}
 
-		if (!this._isPoleDark(-90)) {
-			filledRings.push([
-				[-90, bounds.minLng],
-				[-90, bounds.maxLng],
-				[bounds.minLat, bounds.maxLng],
-				[bounds.minLat, bounds.minLng]
-			]);
+		if (northPoleDark) {
+			return [this._polarCapRing(ring, 90)];
 		}
 
-		return filledRings;
+		return [this._polarCapRing(ring, -90)];
 	},
 
-	_outerRing: function (bounds) {
-		return [
-			[-90, bounds.minLng],
-			[-90, bounds.maxLng],
-			[90, bounds.maxLng],
-			[90, bounds.minLng]
-		];
+	_polarCapRing: function (ring, poleLat) {
+		var firstLng = ring[0][1];
+		var lastLng = ring[ring.length - 1][1];
+
+		return ring.concat([
+			[poleLat, lastLng],
+			[poleLat, firstLng]
+		]);
 	},
 
 	_ringBounds: function (ring) {
@@ -399,10 +440,10 @@ var Terminator = L.LayerGroup.extend({
 
 	_isPoleDark: function (lat) {
 		if (lat > 0) {
-			return this._lastSunDeclination <= -this.options.solarDepression;
+			return this._lastSunDeclination < -this.options.solarDepression - EPSILON;
 		}
 
-		return this._lastSunDeclination >= this.options.solarDepression;
+		return this._lastSunDeclination > this.options.solarDepression + EPSILON;
 	}
 });
 
